@@ -107,17 +107,17 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-        token_count = num_tokens_from_string(update.message.text, MODEL_NAME)
-        if token_count > int(MAX_TOKENS / 2):
-            await update.message.reply_text(f"Message token count {token_count} exceeds max token limit {MAX_TOKENS / 2}")
+        used_tokens = num_tokens_from_string(update.message.text, MODEL_NAME)
+        if used_tokens > int(MAX_TOKENS / 2):
+            await update.message.reply_text(f"Message token count {used_tokens} exceeds max token limit {MAX_TOKENS / 2}")
             return
 
         prompt = "You're a helpful assistant. You provide concise answers unless prompted for more detail. You avoid providing lists, or advice unprompted."
-        used_tokens = token_count + num_tokens_from_string(prompt, MODEL_NAME)
+        used_tokens = used_tokens + num_tokens_from_string(prompt, MODEL_NAME)
         messages = [
             {"role": "system", "content": prompt},
         ]
-        for msg in get_messages(update.effective_user.id, int(MAX_TOKENS*0.75)-token_count, MODEL_NAME, conn):
+        for msg in get_messages(update.effective_user.id, int(MAX_TOKENS*0.75)-used_tokens, MODEL_NAME, conn):
             messages.append({"role": msg[0], "content": msg[1]})
             used_tokens = used_tokens + msg[2]
         messages.append({"role": "user", "content": update.message.text})
