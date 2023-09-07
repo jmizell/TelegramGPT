@@ -60,6 +60,29 @@ python bot.py
 
 You can customize the system message that guides the chatbot's behavior by editing the `system.txt` file.
 
+## Docker Deployment
+
+### Configuration
+
+Before building and running the Docker container, make sure to create a `config.env` file in the same directory as your Dockerfile. Add your Telegram bot API key and OpenAI API key to this file:
+
+```env
+TELEGRAM_BOT_KEY=your_telegram_bot_key_here
+OPENAI_API_KEY=your_openai_api_key_here
+# Add other environment variables as needed
+```
+
+### Building the Docker Image
+
+To build the Docker image, navigate to the directory containing the Dockerfile and run:
+
+```bash
+docker build -t telegramgpt:latest .
+```
+
+This will build a Docker image and tag it as `telegramgpt:latest`.
+
+
 ### Running the Docker Container
 
 To run the Docker container in detached mode, you can use the following command:
