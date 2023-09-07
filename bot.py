@@ -3,20 +3,29 @@ import os
 import sqlite3
 import base64
 import json
+import time
 from telegram import ForceReply, Update, User
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 import openai
 import tiktoken
 
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "16000"))
-MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo-16k")
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo-16k-0613")
 ALLOWED_USERS = json.loads(os.getenv("ALLOWED_USERS", "[]"))
+DB_FILE = "./data/chat_history.db"
+with open('system.txt', 'r', encoding='utf-8', errors='ignore') as f:
+    SYSTEM_MESSAGE = f.read()
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+
+
+def file_to_str(file_name):
+    with open(file_name, 'r', encoding='utf-8', errors='ignore') as f:
+        return f.read()
 
 
 def num_tokens_from_string(string: str, model_name: str) -> int:
@@ -28,7 +37,7 @@ def num_tokens_from_string(string: str, model_name: str) -> int:
 
 def create_table():
     """Create SQLite table if it doesn't exist."""
-    with sqlite3.connect('chat_history.db') as conn:
+    with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("""
         CREATE TABLE IF NOT EXISTS chat_history (
@@ -79,7 +88,8 @@ def is_allowed(user: User) -> bool:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
-    logger.info(f"user={update.effective_user}, chat={update.effective_chat}, start")
+    logger.info(
+        f"user={update.effective_user}, chat={update.effective_chat}, start")
     if not is_allowed(update.effective_user):
         await update.message.reply_text("unauthorized")
         return
@@ -91,7 +101,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /help is issued."""
-    logger.info(f"user={update.effective_user}, chat={update.effective_chat}, help")
+    logger.info(
+        f"user={update.effective_user}, chat={update.effective_chat}, help")
     if not is_allowed(update.effective_user):
         await update.message.reply_text("unauthorized")
         return
@@ -101,7 +112,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Process chat message."""
 
-    logger.info(f"user={update.effective_user}, chat={update.effective_chat}, chat")
+    logger.info(
+        f"user={update.effective_user}, chat={update.effective_chat}, chat")
     if not is_allowed(update.effective_user):
         await update.message.reply_text("unauthorized")
         return
@@ -112,10 +124,10 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.message.reply_text(f"Message token count {used_tokens} exceeds max token limit {MAX_TOKENS / 2}")
             return
 
-        prompt = "You're a helpful assistant. You provide concise answers unless prompted for more detail. You avoid providing lists, or advice unprompted."
-        used_tokens = used_tokens + num_tokens_from_string(prompt, MODEL_NAME)
+        used_tokens = used_tokens + \
+            num_tokens_from_string(SYSTEM_MESSAGE, MODEL_NAME)
         messages = [
-            {"role": "system", "content": prompt},
+            {"role": "system", "content": SYSTEM_MESSAGE},
         ]
         for msg in get_messages(update.effective_user.id, int(MAX_TOKENS*0.75)-used_tokens, MODEL_NAME, conn):
             messages.append({"role": msg[0], "content": msg[1]})
@@ -123,22 +135,32 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         messages.append({"role": "user", "content": update.message.text})
         logger.info(f"user={update.effective_user}, chat={update.effective_chat}, used_tokens={used_tokens}, chat={json.dumps(messages, indent=3, sort_keys=True)}")
 
-        response = openai.ChatCompletion.create(
+        msg = await update.message.reply_text("...")
+        completion = openai.ChatCompletion.create(
             model=MODEL_NAME,
             messages=messages,
             temperature=0,
             max_tokens=MAX_TOKENS-used_tokens,
             top_p=1,
             frequency_penalty=0,
-            presence_penalty=0
+            presence_penalty=0,
+            stream=True,
         )
-        add_message_to_db(update.effective_user.id, "user", update.message.text, conn)
-        response_role = response["choices"][0]["message"]["role"]
-        response_text = response["choices"][0]["message"]["content"]
-        add_message_to_db(update.effective_user.id, response_role, response_text, conn)
-        logger.info(f"user={update.effective_user}, chat={update.effective_chat}, response={response_text}")
 
-        await update.message.reply_text(response_text)
+        response_text = ""
+        last_message_send = time.time()
+        add_message_to_db(update.effective_user.id, "user", update.message.text, conn)
+        for chunk in completion:
+            if chunk.choices[0].finish_reason:
+                break
+            response_text = response_text + chunk.choices[0].delta.content
+            if time.time() - last_message_send > 5:
+                last_message_send = time.time()
+                await msg.edit_text(response_text + "\n\n...")
+
+        add_message_to_db(update.effective_user.id, "assistant", response_text, conn)
+        logger.info(f"user={update.effective_user}, chat={update.effective_chat}, response={response_text}")
+        await msg.edit_text(response_text)
     except Exception as oops:
         error_message = f"An error occurred: {str(oops)}"
         logger.error(error_message)
@@ -147,15 +169,17 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def main() -> None:
     """Start the bot."""
-    application = Application.builder().token(os.getenv("TELEGRAM_BOT_KEY")).build()
+    application = Application.builder().token(
+        os.getenv("TELEGRAM_BOT_KEY")).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND, chat))
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
     create_table()
-    with sqlite3.connect('chat_history.db') as conn:
+    with sqlite3.connect(DB_FILE) as conn:
         conn.row_factory = sqlite3.Row
         main()

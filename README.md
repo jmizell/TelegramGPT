@@ -61,6 +61,22 @@ python bot.py
 - `MODEL_NAME`: The OpenAI GPT model name (default is `gpt-3.5-turbo-16k`).
 - `ALLOWED_USERS`: A JSON array of telegram user IDs that are allowed to interact with the bot (default is an empty array).
 
+### Running the Docker Container
+
+To run the Docker container in detached mode, you can use the following command:
+
+```bash
+docker run -d --name telegramgpt --restart=always --env-file config.env -v ${PWD}/data:/app/data telegramgpt:latest
+```
+
+This command does the following:
+
+- `-d` runs the container in detached mode, in the background.
+- `--name telegramgpt` names the container "telegramgpt".
+- `--restart=always` ensures the container restarts automatically if it stops.
+- `--env-file config.env` specifies a file from which to read environment variables, including your Telegram bot and OpenAI API keys.
+- `-v ${PWD}/data:/app/data` mounts the `data` directory from your current location to `/app/data` in the container, allowing the SQLite database to be stored persistently.
+
 ## Contributing
 
 Feel free to submit pull requests or issues to improve the bot.
