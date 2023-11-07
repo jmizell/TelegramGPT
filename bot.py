@@ -11,6 +11,7 @@ import tiktoken
 
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "16000"))
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo-16k-0613")
+TOKENIZER_MODEL_NAME = os.getenv("TOKENIZER_MODEL_NAME", "gpt-3.5-turbo")
 ALLOWED_USERS = json.loads(os.getenv("ALLOWED_USERS", "[]"))
 DB_FILE = "./data/chat_history.db"
 with open('system.txt', 'r', encoding='utf-8', errors='ignore') as f:
@@ -62,7 +63,7 @@ def add_message_to_db(user_id: int, role: str, message: str, conn):
 def get_messages(user_id: int, max_tokens: int, model_name: str, conn):
     """Retrieve messages based on token count."""
     cursor = conn.execute(
-        "SELECT * FROM chat_history WHERE user_id = ? ORDER BY timestamp ASC", (str(user_id),))
+        "SELECT * FROM chat_history WHERE user_id = ? ORDER BY timestamp DESC", (str(user_id),))
     rows = cursor.fetchall()
 
     total_tokens = 0
@@ -78,6 +79,7 @@ def get_messages(user_id: int, max_tokens: int, model_name: str, conn):
         else:
             break
 
+    messages.reverse()
     return messages
 
 
@@ -119,28 +121,29 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-        used_tokens = num_tokens_from_string(update.message.text, MODEL_NAME)
+        # ChatML Prompt Format
+        # https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/chatgpt?tabs=python&pivots=programming-language-chat-ml#working-with-chat-markup-language-chatml
+        # Most open source models use this prompting format
+        # Tested working with Mistral-7B-OpenOrca and dolphin-2.1-mistral-7b
+        prompt = f"<|im_start|>system\n{SYSTEM_MESSAGE}<|im_end|>\n"
+        user_prompt = f"<|im_start|>user\n{update.message.text}<|im_end|>\n"
+        used_tokens = num_tokens_from_string(f"{prompt}{user_prompt}", TOKENIZER_MODEL_NAME)
         if used_tokens > int(MAX_TOKENS / 2):
             await update.message.reply_text(f"Message token count {used_tokens} exceeds max token limit {MAX_TOKENS / 2}")
             return
 
-        used_tokens = used_tokens + \
-            num_tokens_from_string(SYSTEM_MESSAGE, MODEL_NAME)
-        messages = [
-            {"role": "system", "content": SYSTEM_MESSAGE},
-        ]
-        for msg in get_messages(update.effective_user.id, int(MAX_TOKENS*0.75)-used_tokens, MODEL_NAME, conn):
-            messages.append({"role": msg[0], "content": msg[1]})
-            used_tokens = used_tokens + msg[2]
-        messages.append({"role": "user", "content": update.message.text})
-        logger.info(f"user={update.effective_user}, chat={update.effective_chat}, used_tokens={used_tokens}, chat={json.dumps(messages, indent=3, sort_keys=True)}")
+        for msg in get_messages(update.effective_user.id, MAX_TOKENS*0.2, TOKENIZER_MODEL_NAME, conn):
+            prompt = f"{prompt}<|im_start|>{msg[0]}\n{msg[1]}<|im_end|>\n"
+        
+        prompt = f"{prompt}{user_prompt}<|im_start|>assistant\n"
+        logger.info(f"user={update.effective_user}, chat={update.effective_chat}, used_tokens={used_tokens}, chat={user_prompt}")
 
         msg = await update.message.reply_text("...")
-        completion = openai.ChatCompletion.create(
+        completion = openai.Completion.create(
             model=MODEL_NAME,
-            messages=messages,
-            temperature=0,
-            max_tokens=MAX_TOKENS-used_tokens,
+            prompt=prompt,
+            temperature=1,
+            max_tokens=(MAX_TOKENS*0.9)-num_tokens_from_string(prompt, TOKENIZER_MODEL_NAME),
             top_p=1,
             frequency_penalty=0,
             presence_penalty=0,
@@ -153,8 +156,10 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         for chunk in completion:
             if chunk.choices[0].finish_reason:
                 break
-            response_text = response_text + chunk.choices[0].delta.content
-            if time.time() - last_message_send > 5:
+            if "text" in chunk.choices[0]:
+                response_text = response_text + chunk.choices[0].text
+                response_text = response_text.lstrip(': \t\n\r')
+            if time.time() - last_message_send > 7:
                 last_message_send = time.time()
                 await msg.edit_text(response_text + "\n\n...")
 
@@ -162,6 +167,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.info(f"user={update.effective_user}, chat={update.effective_chat}, response={response_text}")
         await msg.edit_text(response_text)
     except Exception as oops:
+        print(oops)
         error_message = f"An error occurred: {str(oops)}"
         logger.error(error_message)
         await update.message.reply_text(error_message)
