@@ -18,6 +18,7 @@ This project is a Telegram chatbot built using Python. It utilizes the OpenAI GP
 - OpenAI Python package
 - Telegram API
 - Tiktoken Python package
+- VLLM for local AI
 
 ## Installation
 
@@ -47,6 +48,17 @@ This project is a Telegram chatbot built using Python. It utilizes the OpenAI GP
     MODEL_NAME=gpt-3.5-turbo-16k
     ALLOWED_USERS=[user_id1, user_id2]
     ```
+
+## Configuration for VLLM
+
+To use the VLLM server instead of the OpenAI API, set the following environment variables in your shell or in a .env file:
+
+```bash
+export OPENAI_API_KEY=null
+export OPENAI_API_BASE=http://localhost:8000/v1
+```
+
+Make sure your VLLM server is running and accessible at the OPENAI_API_BASE URL. For local testing, it should be http://localhost:8000/v1.
 
 ## Usage
 
