@@ -137,6 +137,12 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Tested working with Airoboros-L2-70B-3.1.2
         # https://huggingface.co/TheBloke/Airoboros-L2-70B-3.1.2-AWQ
 
+        # TODO make it easier to switch prompt formats for models
+        # This code is way too tightly coupled with a specific model. This needs to be generalized
+        # to feed in a system message, and chat history, and spit out an appropriately formated
+        # prompt. Right now we're also kind of loose about handling token budgets, this should
+        # properly account for the final token count wth prompt formatting. 
+
         prompt = f"[INST] <<SYS>>\n{SYSTEM_MESSAGE}\n"
         user_prompt = f"</s><s>[INST] {update.message.text} [/INST]"
         used_tokens = num_tokens_from_string(f"{prompt}{user_prompt}", TOKENIZER_MODEL_NAME)
