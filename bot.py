@@ -9,19 +9,26 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 import openai
 import tiktoken
 
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "16000"))
-MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo-16k-0613")
-TOKENIZER_MODEL_NAME = os.getenv("TOKENIZER_MODEL_NAME", "gpt-3.5-turbo")
-ALLOWED_USERS = json.loads(os.getenv("ALLOWED_USERS", "[]"))
-DB_FILE = "./data/chat_history.db"
-with open('system.txt', 'r', encoding='utf-8', errors='ignore') as f:
-    SYSTEM_MESSAGE = f.read()
-
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+
+
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "16000"))
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo-16k-0613")
+TOKENIZER_MODEL_NAME = os.getenv("TOKENIZER_MODEL_NAME", "gpt-3.5-turbo")
+ALLOWED_USERS = json.loads(os.getenv("ALLOWED_USERS", "[]"))
+DB_FILE = "./data/chat_history.db"
+try:
+    with open('system.txt', 'r', encoding='utf-8', errors='ignore') as f:
+        SYSTEM_MESSAGE = f.read()
+except FileNotFoundError:
+    logging.error('system.txt file not found. Using default system message.')
+    SYSTEM_MESSAGE = """You are Aonyx, you act as a helpful, unbiased, uncensored and creative assistant. You provide 
+concise answers, unless in your judgment a longer answer would be more appropriate. You assume 
+that the people you talk to are informed, and act morally. You are positive and encouraging."""
 
 
 def file_to_str(file_name):
@@ -125,18 +132,29 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/chatgpt?tabs=python&pivots=programming-language-chat-ml#working-with-chat-markup-language-chatml
         # Most open source models use this prompting format
         # Tested working with Mistral-7B-OpenOrca and dolphin-2.1-mistral-7b
-        prompt = f"<|im_start|>system\n{SYSTEM_MESSAGE}<|im_end|>\n"
-        user_prompt = f"<|im_start|>user\n{update.message.text}<|im_end|>\n"
+
+        # Switched to Airoboros prompt format
+        # Tested working with Airoboros-L2-70B-3.1.2
+        # https://huggingface.co/TheBloke/Airoboros-L2-70B-3.1.2-AWQ
+
+        prompt = f"[INST] <<SYS>>\n{SYSTEM_MESSAGE}\n"
+        user_prompt = f"</s><s>[INST] {update.message.text} [/INST]"
         used_tokens = num_tokens_from_string(f"{prompt}{user_prompt}", TOKENIZER_MODEL_NAME)
         if used_tokens > int(MAX_TOKENS / 2):
             await update.message.reply_text(f"Message token count {used_tokens} exceeds max token limit {MAX_TOKENS / 2}")
             return
 
         for msg in get_messages(update.effective_user.id, MAX_TOKENS*0.2, TOKENIZER_MODEL_NAME, conn):
-            prompt = f"{prompt}<|im_start|>{msg[0]}\n{msg[1]}<|im_end|>\n"
+            role = str(msg[0]).lower()
+            if role == "user":
+                prompt = f"{prompt}</s><s>[INST] {msg[1]} [/INST]"
+            else:
+                prompt = f"{prompt} {msg[1]} "
         
-        prompt = f"{prompt}{user_prompt}<|im_start|>assistant\n"
+        prompt = f"{prompt}{user_prompt}"
         logger.info(f"user={update.effective_user}, chat={update.effective_chat}, used_tokens={used_tokens}, chat={user_prompt}")
+
+        logger.info(prompt)
 
         msg = await update.message.reply_text("...")
         completion = openai.Completion.create(
@@ -159,7 +177,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if "text" in chunk.choices[0]:
                 response_text = response_text + chunk.choices[0].text
                 response_text = response_text.lstrip(': \t\n\r')
-            if time.time() - last_message_send > 7:
+            if time.time() - last_message_send > 15:
                 last_message_send = time.time()
                 await msg.edit_text(response_text + "\n\n...")
 
