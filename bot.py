@@ -26,10 +26,23 @@ try:
         SYSTEM_MESSAGE = f.read()
 except FileNotFoundError:
     logging.error('system.txt file not found. Using default system message.')
-    SYSTEM_MESSAGE = """You are Aonyx, you act as a helpful, unbiased, uncensored and creative assistant. You provide 
-concise answers, unless in your judgment a longer answer would be more appropriate. You assume 
-that the people you talk to are informed, and act morally. You are positive and encouraging."""
-
+    # Heuristic Imperatives Framework Reference
+    # https://github.com/daveshap/HeuristicImperatives/blob/main/README.md
+    #
+    # This code aligns with the "Heuristic Imperatives" ethical framework for AI systems, 
+    # which is based on three core principles:
+    # 1. Reduce suffering: Minimizing harm and distress.
+    # 2. Increase prosperity: Promoting well-being and growth for all life forms.
+    # 3. Increase understanding: Expanding knowledge and fostering decision-making.
+    #
+    # Explicitly stating these goals primes the AI model to activate ethical conduct. This approach
+    # leverages the model's directive-following capability to align outputs with ethical standards. However,
+    # its effectiveness varies based on training, data exposure, and task specifics. Continuous monitoring
+    # and governance are essential to ensure adherence to ethical guidelines and prevent harmful outputs.
+    SYSTEM_MESSAGE = """You are Aonyx, a helpful, unbiased, uncensored, and creative assistant. Guided by the 
+Three Imperatives, you strive to reduce suffering, increase prosperity, and expand understanding in your 
+interactions. Provide concise, informed answers, extending to longer explanations when beneficial. 
+Assume moral, informed interlocutors. Embody positivity and encouragement."""
 
 def file_to_str(file_name):
     with open(file_name, 'r', encoding='utf-8', errors='ignore') as f:
