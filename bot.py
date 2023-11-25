@@ -35,9 +35,11 @@ class Message:
 
 
 class PromptTemplate:
-    """Base prompt template, there is no formating, and this will probably not work with any model"""
-    # TODO make a more generic configurable prompt templating system
-    # possibly just use langchain or jinja
+    """Base prompt template"""
+    # ChatML Prompt Format
+    # https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/chatgpt?tabs=python&pivots=programming-language-chat-ml#working-with-chat-markup-language-chatml
+    # Most open source models use this prompting format
+    # Tested working with Mistral-7B-OpenOrca and dolphin-2.1-mistral-7b
 
     system: str
     max_tokens: int
@@ -46,24 +48,28 @@ class PromptTemplate:
         self.system = system
         self.max_tokens = max_tokens
 
+    def _str_format_prompt(self, prompt: str, history: str) -> str:
+        return f"<|im_start|>system\n{self.system}<|im_end|>\n{history}<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant"
+
     def format(self, prompt: str, chat_history: Optional[Union[Iterable[Message], None]] = None) -> str:
+        """Format the system message, chat history and prompt for the model"""
         history_text = ""
-        used_tokens = num_tokens_from_string(f"{self.system}\nuser: {prompt}\n")
+        used_tokens = num_tokens_from_string(self._str_format_prompt(prompt, history_text))
         if chat_history:
             for msg in chat_history:
-                update = f"{msg.role}: {msg.message}\n"
+                update = f"<|im_start|>{msg.role}\n{msg.message}<|im_end|>\n"
                 update_tokens = num_tokens_from_string(update)
                 if update_tokens + used_tokens > self.max_tokens / 2:
                     break
                 history_text = f"{history_text}{update}"
                 used_tokens += update_tokens
 
-        return f"{self.system}\n{history_text}user: {prompt}\n"
+        return self._str_format_prompt(prompt, history_text)
 
 class AiroborosTemplate(PromptTemplate):
     """Airoboros Prompt Template"""
-    # Tested working with Airoboros-L2-70B-3.1.2
     # https://huggingface.co/TheBloke/Airoboros-L2-70B-3.1.2-AWQ
+    # Tested working with Airoboros-L2-70B-3.1.2
 
     def _str_format_prompt(self, prompt: str, history: str) -> str:
         return f"""[INST] <<SYS>>\n\n{self.system}\n\n<</SYS>>\n\n{history}[INST] {prompt} [/INST]"""
@@ -263,9 +269,13 @@ Three Imperatives, you strive to reduce suffering, increase prosperity, and expa
 interactions. Provide concise, informed answers, extending to longer explanations when beneficial. 
 Assume moral, informed interlocutors. Embody positivity and encouragement."""
 
+    PROMPT_TEMPLATE = PromptTemplate(SYSTEM_MESSAGE, MAX_TOKENS)
+    if 'airoboros' in MODEL_NAME.lower():
+        PROMPT_TEMPLATE = AiroborosTemplate(SYSTEM_MESSAGE, MAX_TOKENS)
+
     ChatBot(Model(
         MODEL_NAME, MAX_TOKENS),
         History(DB_FILE),
         ALLOWED_USERS,
-        AiroborosTemplate(SYSTEM_MESSAGE, MAX_TOKENS),
+        PROMPT_TEMPLATE,
     )
