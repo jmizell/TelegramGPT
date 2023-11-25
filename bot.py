@@ -51,20 +51,24 @@ class PromptTemplate:
     def _str_format_prompt(self, prompt: str, history: str) -> str:
         return f"<|im_start|>system\n{self.system}<|im_end|>\n{history}<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant"
 
+    def _str_format_history(self, msg: Message) -> str:
+        return f"<|im_start|>{msg.role}\n{msg.message}<|im_end|>\n"
+
     def format(self, prompt: str, chat_history: Optional[Union[Iterable[Message], None]] = None) -> str:
         """Format the system message, chat history and prompt for the model"""
-        history_text = ""
-        used_tokens = num_tokens_from_string(self._str_format_prompt(prompt, history_text))
+        history = []
+        used_tokens = num_tokens_from_string(self._str_format_prompt(prompt, ""))
         if chat_history:
             for msg in chat_history:
-                update = f"<|im_start|>{msg.role}\n{msg.message}<|im_end|>\n"
+                update = self._str_format_history(msg)
                 update_tokens = num_tokens_from_string(update)
                 if update_tokens + used_tokens > self.max_tokens / 2:
                     break
-                history_text = f"{history_text}{update}"
+                history.append(update)
                 used_tokens += update_tokens
+        history.reverse()
+        return self._str_format_prompt(prompt, "".join(history))
 
-        return self._str_format_prompt(prompt, history_text)
 
 class AiroborosTemplate(PromptTemplate):
     """Airoboros Prompt Template"""
@@ -74,27 +78,10 @@ class AiroborosTemplate(PromptTemplate):
     def _str_format_prompt(self, prompt: str, history: str) -> str:
         return f"""[INST] <<SYS>>\n\n{self.system}\n\n<</SYS>>\n\n{history}[INST] {prompt} [/INST]"""
 
-    def _str_format_user(self, message: str) -> str:
-        return f"[INST] {message} [/INST]"
-
-    def _str_format_assistant(self, message: str) -> str:
-        return f" {message} </s><s>"
-
-    def format(self, prompt: str, chat_history: Optional[Union[Iterable[Message], None]] = None) -> str:
-        history_text = ""
-        used_tokens = num_tokens_from_string(self._str_format_prompt(prompt, history_text))
-        if chat_history:
-            for msg in chat_history:
-                if msg.role == "user":
-                    update = self._str_format_user(msg.message)
-                else:
-                    update = self._str_format_assistant(msg.message)
-                update_tokens = num_tokens_from_string(update)
-                if update_tokens + used_tokens > self.max_tokens / 2:
-                    break
-                history_text = f"{history_text}{update}"
-                used_tokens += update_tokens
-        return self._str_format_prompt(prompt, history_text)
+    def _str_format_history(self, msg: Message) -> str:
+        if msg.role == "user":
+            return f"[INST] {msg.message} [/INST]"
+        return f" {msg.message} </s><s>"
 
 
 class Model:
@@ -152,7 +139,6 @@ class History:
         """Retrieve messages based on token count."""
         cursor = self.conn.execute("SELECT * FROM chat_history WHERE user_id = ? ORDER BY timestamp DESC", (str(user_id),))
         rows = cursor.fetchall()
-        rows.reverse()
         for row in rows:
             decoded_message = base64.b64decode(row['base64_message']).decode()
             yield Message(row['role'], decoded_message)
